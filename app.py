@@ -13,6 +13,7 @@ output_frame = None
 frame_lock = threading.Lock()
 frame_queue = queue.Queue(maxsize=2)  # Limit queue size
 model = None
+camera_thread = None
 
 def load_model():
     global model
@@ -118,8 +119,16 @@ def generate_frames():
             print(f"Error in generate_frames: {str(e)}")
             break
 
+def start_camera():
+    global camera_thread
+    if camera_thread is None or not camera_thread.is_alive():
+        camera_thread = threading.Thread(target=camera_stream)
+        camera_thread.daemon = True
+        camera_thread.start()
+
 @app.route('/')
 def index():
+    start_camera()  # Start camera when first accessing the page
     return render_template('index.html')
 
 @app.route('/video_feed')
@@ -127,16 +136,7 @@ def video_feed():
     return Response(generate_frames(),
                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
-# Start camera stream in a separate thread
-camera_thread = None
-
-@app.before_first_request
-def activate_camera():
-    global camera_thread
-    camera_thread = threading.Thread(target=camera_stream)
-    camera_thread.daemon = True
-    camera_thread.start()
-
+# Cleanup when the app is shutting down
 @app.teardown_appcontext
 def cleanup(exception=None):
     release_camera()
