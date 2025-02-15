@@ -1,12 +1,12 @@
-from flask import Flask, Response, render_template
-from ultralytics import YOLO
+from flask import Flask, render_template, Response, jsonify, request
 import cv2
 import numpy as np
-import base64
-from flask import request, jsonify
+from ultralytics import YOLO
+import io
+import time
 
 app = Flask(__name__)
-model = YOLO('yolov8n.pt')
+model = YOLO('yolov8n.pt')  # Will auto-download pretrained model
 
 @app.route('/')
 def index():
@@ -14,33 +14,28 @@ def index():
 
 @app.route('/detect', methods=['POST'])
 def detect():
-    try:
-        # Get the image data from the request
-        image_data = request.json['image'].split(',')[1]
-        image_bytes = base64.b64decode(image_data)
-        
-        # Convert to numpy array
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        # Run detection
-        results = model(img, conf=0.25)
-        
-        # Get detection results
-        detections = []
-        for r in results[0].boxes.data.tolist():
-            x1, y1, x2, y2, conf, cls = r
+    # Get image from mobile camera
+    file = request.files['image'].read()
+    img = cv2.imdecode(np.frombuffer(file, np.uint8), cv2.IMREAD_COLOR)
+    
+    # Perform detection
+    results = model(img)
+    detections = []
+    
+    for result in results:
+        for box in result.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            conf = float(box.conf[0])
+            cls_id = int(box.cls[0])
+            label = model.names[cls_id]
+            
             detections.append({
-                'bbox': [float(x1), float(y1), float(x2), float(y2)],
-                'confidence': float(conf),
-                'class': int(cls),
-                'name': results[0].names[int(cls)]
+                'label': label,
+                'confidence': conf,
+                'coordinates': [x1, y1, x2, y2]
             })
-        
-        return jsonify({'detections': detections})
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    
+    return jsonify({'detections': detections})
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, ssl_context='adhoc')
+    app.run(host='0.0.0.0', port=10000)
