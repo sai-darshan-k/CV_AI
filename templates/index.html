@@ -1,73 +1,132 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real-time Object Detection</title>
+    <title>Mobile Camera Object Detection</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {
-            font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
+            margin: 0;
             padding: 20px;
-            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
-        .video-container {
-            margin-top: 20px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-            border-radius: 8px;
-            overflow: hidden;
+        #videoElement {
+            width: 100%;
+            max-width: 640px;
+            margin-bottom: 20px;
         }
-        img {
-            max-width: 100%;
-            height: auto;
+        #canvas {
+            display: none;
         }
         .controls {
-            margin: 20px 0;
+            margin-bottom: 20px;
         }
-        button {
-            padding: 10px 20px;
-            margin: 0 10px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        #startBtn {
-            background-color: #4CAF50;
-            color: white;
-        }
-        #stopBtn {
-            background-color: #f44336;
-            color: white;
+        #detectionResults {
+            width: 100%;
+            max-width: 640px;
+            margin-top: 20px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
         }
     </style>
-    <script>
-        function startStream() {
-            fetch('/start_stream')
-                .then(() => {
-                    document.getElementById('videoFeed').src = '/video_feed?' + new Date().getTime();
-                });
-        }
-        
-        function stopStream() {
-            fetch('/stop_stream')
-                .then(() => {
-                    document.getElementById('videoFeed').src = '';
-                });
-        }
-        
-        // Start stream when page loads
-        window.onload = startStream;
-    </script>
 </head>
 <body>
-    <h1>Real-time Object Detection</h1>
+    <video id="videoElement" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
     <div class="controls">
-        <button id="startBtn" onclick="startStream()">Start Stream</button>
-        <button id="stopBtn" onclick="stopStream()">Stop Stream</button>
+        <button id="startButton">Start Detection</button>
+        <button id="stopButton" disabled>Stop Detection</button>
     </div>
-    <div class="video-container">
-        <img id="videoFeed" alt="Video stream">
-    </div>
+    <div id="detectionResults"></div>
+
+    <script>
+        let video = document.getElementById('videoElement');
+        let canvas = document.getElementById('canvas');
+        let startButton = document.getElementById('startButton');
+        let stopButton = document.getElementById('stopButton');
+        let resultsDiv = document.getElementById('detectionResults');
+        let stream = null;
+        let detecting = false;
+        
+        // Start camera
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        facingMode: 'environment',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    } 
+                });
+                video.srcObject = stream;
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                alert("Error accessing camera. Please make sure you've granted camera permissions.");
+            }
+        }
+
+        // Process frame and send to server
+        async function processFrame() {
+            if (!detecting) return;
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0);
+            
+            try {
+                // Convert canvas to base64
+                let imageData = canvas.toDataURL('image/jpeg', 0.8);
+                
+                // Send to server
+                let response = await fetch('/detect', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image: imageData
+                    })
+                });
+                
+                let result = await response.json();
+                
+                // Display results
+                let html = '<h3>Detected Objects:</h3>';
+                result.detections.forEach(det => {
+                    html += `<div>${det.name} (${(det.confidence * 100).toFixed(1)}%)</div>`;
+                });
+                resultsDiv.innerHTML = html;
+                
+                // Continue detection
+                if (detecting) {
+                    requestAnimationFrame(processFrame);
+                }
+            } catch (err) {
+                console.error("Error during detection:", err);
+                detecting = false;
+                startButton.disabled = false;
+                stopButton.disabled = true;
+            }
+        }
+
+        // Event listeners
+        startButton.onclick = () => {
+            detecting = true;
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            processFrame();
+        };
+
+        stopButton.onclick = () => {
+            detecting = false;
+            startButton.disabled = false;
+            stopButton.disabled = true;
+        };
+
+        // Start camera when page loads
+        startCamera();
+    </script>
 </body>
 </html>
